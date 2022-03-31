@@ -975,6 +975,20 @@ std::vector<xla::ComputationClient::DataPtr> XLATensor::GatherTensorsXlaData(
   return result_tensors_data;
 }
 
+void XLATensor::TensorCollectionBarrier(SyncTensorCollection* coll) {
+  if (coll->indices.empty()) {
+    return;
+  }
+  TF_VLOG(4) << "Waiting on device barrier for device " << coll->device
+             << " ...";
+  {
+    XLA_TIMED("DeviceLockWait");
+    coll->unlocker = LockDevices({coll->device});
+  }
+  TF_VLOG(4) << "Waiting on device barrier for device " << coll->device
+             << " done!";
+}
+
 std::vector<at::Tensor> XLATensor::GetTensorsOpByOp(
     std::vector<XLATensor>* tensors) {
   SyncTensorsConfig config;
@@ -986,6 +1000,7 @@ std::vector<at::Tensor> XLATensor::GetTensorsOpByOp(
                                     &coll.indices);
 
     std::vector<ir::Value> roots = CollectRoots(*tensors, coll.indices);
+    TensorCollectionBarrier(&coll);
     async_tensors_data =
         OpByOpExecutor::Get()->Execute(roots, coll.device.ToString(), {});
   }
@@ -1341,14 +1356,7 @@ std::shared_ptr<XLATensor::Async> XLATensor::ScheduleSyncTensorsGraph(
     ComputationCache::TypePtr cached_computation) {
   tensorflow::profiler::TraceMe activity(
       "ScheduleSyncTensorsGraph", tensorflow::profiler::TraceMeLevel::kInfo);
-  TF_VLOG(4) << "Waiting on device barrier for device " << coll->device
-             << " ...";
-  {
-    XLA_TIMED("DeviceLockWait");
-    coll->unlocker = LockDevices({coll->device});
-  }
-  TF_VLOG(4) << "Waiting on device barrier for device " << coll->device
-             << " done!";
+  TensorCollectionBarrier(coll);
   std::shared_ptr<Async> async = std::make_shared<Async>(
       coll, std::move(parameters_data), std::move(tensors_data),
       std::move(cached_computation));
@@ -1489,9 +1497,9 @@ XLATensor::OpByOpAsync XLATensor::SyncTensorsGraphOpByOp(
 
   std::vector<ir::Value> roots = CollectRoots(*tensors, coll.indices);
   auto tensors_data = FetchTensorData(tensors, coll.config, coll.indices);
+  TensorCollectionBarrier(&coll);
   auto async = std::make_shared<Async>(std::move(coll), std::move(tensors_data),
                                        std::move(roots), devices);
-
   auto syncfn = [async]() -> int {
     try {
       TF_VLOG(3) << "Executing (OpByOp) IR graph hash "
