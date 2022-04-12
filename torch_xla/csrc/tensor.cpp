@@ -1267,6 +1267,7 @@ std::shared_ptr<XLATensor::Async> XLATensor::TryRunCachedSync(
   XLA_VALUE_METRIC("TensorsGraphSize", po_data->post_order.size());
   TF_VLOG(5) << "TensorsGraphSize=" << po_data->post_order.size();
 
+  TensorCollectionBarrier(&coll); /* Temp location. Will eventually move inside ScheduleSyncTensorsGraph() */
   return ScheduleSyncTensorsGraph(
       tensors, coll, std::move(po_data->parameters_data),
       coll->device.ToString(), std::move(cached_computation));
@@ -1691,7 +1692,6 @@ std::shared_ptr<XLATensor::Async> XLATensor::SyncTensorsGraphInternal(
              << torch::lazy::HashToString(coll.hash);
   std::shared_ptr<Async> async = TryRunCachedSync(tensors, &coll, &po_data);
   if (async != nullptr) {
-    TensorCollectionBarrier(&coll);
     return async;
   }
 
