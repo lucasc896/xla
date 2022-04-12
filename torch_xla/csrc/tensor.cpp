@@ -1296,7 +1296,7 @@ XLATensor::PostOrderData XLATensor::RunPostOrder(
   for (auto node : po_data.post_order) {
     const ir::ops::DeviceData* device_data = ir::ops::DeviceData::Cast(node);
     if (device_data != nullptr) {
-      if (device_data->data()->HasValue() == 0) {
+      if (!device_data->data()->HasValue()) {
         TensorCollectionBarrier(coll);
       }
       xla::ComputationClient::Data::OpaqueHandle handle =
